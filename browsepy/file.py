@@ -11,15 +11,24 @@ import random
 import datetime
 import logging
 
-from flask import current_app, send_from_directory
+from flask import current_app, send_from_directory, render_template
+
 from werkzeug.utils import cached_property
 
+from avro.datafile import DataFileReader
+from avro.io import DatumReader
+
+import pyarrow.parquet as pq
+
+import json
+from json2html import *
+
 from . import compat
+
 from .compat import range
 from .stream import TarFileStream
 from .exceptions import OutsideDirectoryBase, OutsideRemovableBase, \
-                        PathTooLongError, FilenameTooLongError
-
+    PathTooLongError, FilenameTooLongError
 
 logger = logging.getLogger(__name__)
 unicode_underscore = '_'.decode('utf-8') if compat.PY_LEGACY else '_'
@@ -37,7 +46,7 @@ nt_device_names = (
     ('CON', 'PRN', 'AUX', 'NUL') +
     tuple(map('COM{}'.format, range(1, 10))) +
     tuple(map('LPT{}'.format, range(1, 10)))
-    )
+)
 fs_safe_characters = string.ascii_uppercase + string.digits
 
 
@@ -103,8 +112,8 @@ class Node(object):
                     file=self,
                     css='remove',
                     endpoint='remove'
-                    )
                 )
+            )
         return widgets + self.plugin_manager.get_widgets(file=self)
 
     @cached_property
@@ -361,8 +370,8 @@ class File(Node):
                 'link',
                 file=self,
                 endpoint='open'
-                )
-            ]
+            )
+        ]
         if self.can_download:
             widgets.append(
                 self.plugin_manager.create_widget(
@@ -371,8 +380,8 @@ class File(Node):
                     file=self,
                     css='download',
                     endpoint='download_file'
-                    )
                 )
+            )
         return widgets + super(File, self).widgets
 
     @cached_property
@@ -408,7 +417,7 @@ class File(Node):
             size, unit = fmt_size(
                 self.stats.st_size,
                 self.app.config['use_binary_multiples'] if self.app else False
-                )
+            )
         except OSError:
             return None
         if unit == binary_units[0]:
@@ -499,8 +508,8 @@ class Directory(Node):
                 'link',
                 file=self,
                 endpoint='browse'
-                )
-            ]
+            )
+        ]
         if self.can_upload:
             widgets.extend((
                 self.plugin_manager.create_widget(
@@ -523,8 +532,8 @@ class Directory(Node):
                     file=self,
                     text='Upload',
                     endpoint='upload'
-                    )
-                ))
+                )
+            ))
         if self.can_download:
             widgets.append(
                 self.plugin_manager.create_widget(
@@ -533,8 +542,8 @@ class Directory(Node):
                     file=self,
                     css='download',
                     endpoint='download_directory'
-                    )
                 )
+            )
         return widgets + super(Directory, self).widgets
 
     @cached_property
@@ -626,9 +635,9 @@ class Directory(Node):
                 self.path,
                 self.app.config['directory_tar_buffsize'],
                 self.app.config['exclude_fnc'],
-                ),
+            ),
             mimetype="application/octet-stream"
-            )
+        )
 
     def contains(self, filename):
         '''
@@ -690,7 +699,7 @@ class Directory(Node):
                 'app': self.app,
                 'parent': self,
                 'is_excluded': False
-                }
+            }
             try:
                 if precomputed_stats and not entry.is_symlink():
                     kwargs['stats'] = entry.stat()
@@ -838,10 +847,10 @@ def check_forbidden_filename(filename,
     :rtype: bool
     '''
     return (
-      filename in restricted_names or
-      destiny_os == 'nt' and
-      filename.split('.', 1)[0].upper() in nt_device_names
-      )
+        filename in restricted_names or
+        destiny_os == 'nt' and
+        filename.split('.', 1)[0].upper() in nt_device_names
+    )
 
 
 def check_path(path, base, os_sep=os.sep):
@@ -876,7 +885,7 @@ def check_base(path, base, os_sep=os.sep):
     return (
         check_path(path, base, os_sep) or
         check_under_base(path, base, os_sep)
-        )
+    )
 
 
 def check_under_base(path, base, os_sep=os.sep):
@@ -917,7 +926,7 @@ def secure_filename(path, destiny_os=os.name, fs_encoding=compat.FS_ENCODING):
             nt_restricted_chars
             if destiny_os == 'nt' else
             restricted_chars
-            ))
+        ))
     path = path.strip(' .')  # required by nt, recommended for others
 
     if check_forbidden_filename(path, destiny_os=destiny_os):
@@ -932,7 +941,7 @@ def secure_filename(path, destiny_os=os.name, fs_encoding=compat.FS_ENCODING):
         'os_name': destiny_os,
         'fs_encoding': fs_encoding,
         'errors': underscore_replace,
-        }
+    }
     fs_encoded_path = compat.fsencode(path, **kwargs)
     fs_decoded_path = compat.fsdecode(fs_encoded_path, **kwargs)
     return fs_decoded_path
@@ -978,5 +987,48 @@ def scandir(path, app=None):
             item
             for item in compat.scandir(path)
             if not exclude(item.path)
-            )
+        )
     return compat.scandir(path)
+
+
+def read_avro_file(file):
+    reader = DataFileReader(open(file, "rb"), DatumReader())
+    data = []
+    fields = json.loads(reader.meta['avro.schema'])['fields']
+
+    for i in range(min(100, reader.file_length)):
+        rec = reader.next()
+        data.append(rec)
+    reader.close()
+
+    json_fields = json.dumps(fields)
+    json_data = json.dumps(data)
+
+    return render_template('tables.html',
+                           columns=len(fields),
+                           rows=reader.file_length,
+                           shown_rows=min(100,
+                                          reader.file_length)) + \
+           json2html.convert(json=json_fields) + \
+           json2html.convert(json=json_data)
+
+
+def read_parquet_file(file):
+    data = pq.read_table(file)
+    df = data.to_pandas()
+    file = pq.ParquetFile(file)
+
+    columns = []
+    for column in file.schema:
+        columns.append(
+            {'name': column.name, 'physical_type': column.physical_type})
+    json_fields = json.dumps(columns)
+
+    return render_template('tables.html',
+                           rows=len(df.index),
+                           columns=len(columns),
+                           shown_rows=min(100,
+                                          len(df.index))) + \
+           json2html.convert(json=json_fields) + \
+           "<p></p>" + \
+           df.head(min(100, len(df.index))).to_html()

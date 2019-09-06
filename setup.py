@@ -44,7 +44,7 @@ sys.path[:] = sys_path
 with open('README.rst') as f:
     meta_doc = f.read()
 
-extra_requires = []
+extra_requires = ['avro', 'json2html', 'pandas', 'pyarrow']
 bdist = 'bdist' in sys.argv or any(a.startswith('bdist_') for a in sys.argv)
 if bdist or not hasattr(os, 'scandir'):
     extra_requires.append('scandir')
@@ -100,7 +100,8 @@ setup(
             'templates/*',
             'static/*/*',
         ]},
-    install_requires=['flask', 'unicategories'] + extra_requires,
+    install_requires=['flask', 'unicategories']
+                     + extra_requires,
     test_suite='browsepy.tests',
     test_runner='browsepy.tests.runner:DebuggerTextTestRunner',
     zip_safe=False,

@@ -14,7 +14,7 @@ from werkzeug.exceptions import NotFound
 
 from .appconfig import Flask
 from .manager import PluginManager
-from .file import Node, secure_filename
+from .file import Node, secure_filename, read_avro_file, read_parquet_file
 from .exceptions import OutsideRemovableBase, OutsideDirectoryBase, \
                         InvalidFilenameError, InvalidPathError
 from . import compat
@@ -35,8 +35,8 @@ app = Flask(
     template_folder=os.path.join(__basedir__, "templates")
     )
 app.config.update(
-    directory_base=compat.getcwd(),
-    directory_start=None,
+    directory_base='/var',
+    directory_start='/var',
     directory_remove=None,
     directory_upload=None,
     directory_tar_buffsize=262144,
@@ -208,7 +208,16 @@ def open_file(path):
     try:
         file = Node.from_urlpath(path)
         if file.is_file and not file.is_excluded:
-            return send_from_directory(file.parent.path, file.name)
+
+            # Shitty solution for avro files. I guess this could be done as a
+            # widget but nobody wants to learn how to do so.
+            ext = file.name.split('.')[-1]
+            if(ext == 'avro'):
+                return read_avro_file(file.parent.path + '/' + file.name)
+            if (ext == 'parquet'):
+                return read_parquet_file(file.parent.path + '/' + file.name)
+            else:
+                return send_from_directory(file.parent.path, file.name)
     except OutsideDirectoryBase:
         pass
     return NotFound()
