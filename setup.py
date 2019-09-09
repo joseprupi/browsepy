@@ -44,7 +44,7 @@ sys.path[:] = sys_path
 with open('README.rst') as f:
     meta_doc = f.read()
 
-extra_requires = ['avro', 'json2html', 'pandas', 'pyarrow']
+extra_requires = ['avro-python3', 'json2html', 'pandas', 'pyarrow']
 bdist = 'bdist' in sys.argv or any(a.startswith('bdist_') for a in sys.argv)
 if bdist or not hasattr(os, 'scandir'):
     extra_requires.append('scandir')
@@ -60,6 +60,7 @@ for debugger in ('ipdb', 'pudb', 'pdb'):
 
 setup(
     name=meta.app,
+    python_requires='>3.5.2',
     version=meta.version,
     url=meta.url,
     download_url=meta.tarball,
